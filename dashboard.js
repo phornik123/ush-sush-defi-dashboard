@@ -29,23 +29,15 @@ async function fetchAllData() {
             yieldYak: processSettledResult(yieldYakData, 'YieldYak')
         };
 
-        // Calculate strategies only from real data
-        const strategies = calculateStrategies(processedData);
-
         // Generate analysis
         const marketAnalysis = generateMarketAnalysis(processedData);
-
-        // Protocol comparison
-        const protocolComparison = await compareProtocols(processedData);
 
         const result = {
             timestamp: new Date().toISOString(),
             executionTime: Date.now() - startTime,
             dataQuality: assessDataQuality(processedData),
             protocols: processedData,
-            strategies: strategies,
-            marketAnalysis: marketAnalysis,
-            protocolComparison: protocolComparison
+            marketAnalysis: marketAnalysis
         };
 
         currentData = result;
@@ -671,60 +663,6 @@ async function compareProtocols(data) {
     return comparison;
 }
 
-// Calculate strategies from real data only
-function calculateStrategies(data) {
-    const strategies = {};
-
-    // Only calculate if we have real Aave data
-    if (data.aave.status === 'success') {
-        const rates = data.aave.rates;
-        strategies.leveraged = {
-            strategy: 'Leveraged Looping',
-            apy: calculateLeveragedAPY(rates, 5, 0.8),
-            netAPY: calculateLeveragedAPY(rates, 5, 0.8),
-            riskLevel: 'High',
-            source: 'aave-v3'
-        };
-    }
-
-    // Only calculate if we have real Beefy data
-    if (data.beefy.status === 'success' && data.beefy.avalancheData.topVaultsByAPY.length > 0) {
-        const bestVault = data.beefy.avalancheData.topVaultsByAPY[0];
-        strategies.autoCompound = {
-            strategy: 'Auto-Compound',
-            apy: bestVault.apy,
-            netAPY: bestVault.apy * 0.995,
-            riskLevel: 'Medium',
-            source: 'beefy'
-        };
-    }
-
-    // Only calculate if we have real Euler data
-    if (data.euler.status === 'success' && data.euler.poolsData.pools.length > 0) {
-        const bestEulerPool = data.euler.poolsData.pools[0];
-        strategies.eulerVault = {
-            strategy: 'Euler V2 Vault',
-            apy: bestEulerPool.apy,
-            netAPY: bestEulerPool.apy * 0.95,
-            riskLevel: 'Medium',
-            source: 'euler-v2'
-        };
-    }
-
-    // Only calculate if we have real Yield Yak data
-    if (data.yieldYak.status === 'success' && data.yieldYak.avalancheData.allFarms.length > 0) {
-        const bestYakFarm = data.yieldYak.avalancheData.topFarmsByAPY[0];
-        strategies.yieldYakFarm = {
-            strategy: 'Yield Yak Auto-Compound',
-            apy: bestYakFarm.estimatedAPY,
-            netAPY: bestYakFarm.estimatedAPY * 0.98, // Lower fees than Beefy
-            riskLevel: 'Medium',
-            source: 'yield-yak'
-        };
-    }
-
-    return strategies;
-}
 
 // Create bucketed analysis of pools
 function createBucketAnalysis(pools) {
@@ -976,9 +914,8 @@ function updateAllDisplays(data) {
     updateOverviewTab(data);
     updateBucketsTab(data);
     updateProtocolsTab(data);
-    updateStrategiesTab(data);
-    updateComparisonTab(data);
     updateAnalysisTab(data);
+    updateIncentivesTab(data);
     updateDataQuality(data.dataQuality);
 }
 
@@ -1101,78 +1038,92 @@ function updateBucketsTab(data) {
     `;
 }
 
-// Update overview tab
+// SAFE UPDATE: Helper function to safely update elements
+function safeUpdateElement(elementId, content, property = 'textContent') {
+    const element = document.getElementById(elementId);
+    if (element) {
+        if (property === 'className') {
+            element.className = content;
+        } else {
+            element[property] = content;
+        }
+    } else {
+        console.warn(`Element with ID '${elementId}' not found`);
+    }
+}
+
+// Update overview tab with error handling
 function updateOverviewTab(data) {
     // Aave data
     if (data.protocols.aave.status === 'success') {
-        document.getElementById('aaveStatus').textContent = 'API_SUCCESS';
-        document.getElementById('aaveStatus').className = 'protocol-status online';
-        document.getElementById('aaveSupplyAPY').textContent = data.protocols.aave.rates.liquidityRate.toFixed(2) + '%';
-        document.getElementById('aaveBorrowAPY').textContent = data.protocols.aave.rates.variableBorrowRate.toFixed(2) + '%';
-        document.getElementById('aaveUtilization').textContent = data.protocols.aave.rates.utilizationRate.toFixed(1) + '%';
-        document.getElementById('aaveError').textContent = '';
+        safeUpdateElement('aaveStatus', 'API_SUCCESS');
+        safeUpdateElement('aaveStatus', 'protocol-status online', 'className');
+        safeUpdateElement('aaveSupplyAPY', data.protocols.aave.rates.liquidityRate.toFixed(2) + '%');
+        safeUpdateElement('aaveBorrowAPY', data.protocols.aave.rates.variableBorrowRate.toFixed(2) + '%');
+        safeUpdateElement('aaveUtilization', data.protocols.aave.rates.utilizationRate.toFixed(1) + '%');
+        safeUpdateElement('aaveError', '');
     } else {
-        document.getElementById('aaveStatus').textContent = 'API_FAILED';
-        document.getElementById('aaveStatus').className = 'protocol-status failed';
-        document.getElementById('aaveError').textContent = data.protocols.aave.error;
+        safeUpdateElement('aaveStatus', 'API_FAILED');
+        safeUpdateElement('aaveStatus', 'protocol-status failed', 'className');
+        safeUpdateElement('aaveError', data.protocols.aave.error);
     }
 
     // Beefy data
     if (data.protocols.beefy.status === 'success') {
-        document.getElementById('beefyStatus').textContent = 'API_SUCCESS';
-        document.getElementById('beefyStatus').className = 'protocol-status online';
-        document.getElementById('beefyTopAPY').textContent = data.protocols.beefy.avalancheData.summary.highestAPY.toFixed(1) + '%';
-        document.getElementById('beefyVaultCount').textContent = data.protocols.beefy.avalancheData.summary.activeVaults;
-        document.getElementById('beefyTVL').textContent = '$' + (data.protocols.beefy.avalancheData.summary.totalTVL / 1000000).toFixed(1) + 'M';
-        document.getElementById('beefyError').textContent = '';
+        safeUpdateElement('beefyStatus', 'API_SUCCESS');
+        safeUpdateElement('beefyStatus', 'protocol-status online', 'className');
+        safeUpdateElement('beefyTopAPY', data.protocols.beefy.avalancheData.summary.highestAPY.toFixed(1) + '%');
+        safeUpdateElement('beefyVaultCount', data.protocols.beefy.avalancheData.summary.activeVaults);
+        safeUpdateElement('beefyTVL', '$' + (data.protocols.beefy.avalancheData.summary.totalTVL / 1000000).toFixed(1) + 'M');
+        safeUpdateElement('beefyError', '');
     } else {
-        document.getElementById('beefyStatus').textContent = 'API_FAILED';
-        document.getElementById('beefyStatus').className = 'protocol-status failed';
-        document.getElementById('beefyError').textContent = data.protocols.beefy.error;
+        safeUpdateElement('beefyStatus', 'API_FAILED');
+        safeUpdateElement('beefyStatus', 'protocol-status failed', 'className');
+        safeUpdateElement('beefyError', data.protocols.beefy.error);
     }
 
     // Euler data
     if (data.protocols.euler.status === 'success') {
-        document.getElementById('eulerStatus').textContent = 'API_SUCCESS';
-        document.getElementById('eulerStatus').className = 'protocol-status online';
-        document.getElementById('eulerTopAPY').textContent = data.protocols.euler.poolsData.summary.highestAPY.toFixed(1) + '%';
-        document.getElementById('eulerPoolCount').textContent = data.protocols.euler.poolsData.summary.totalPools;
-        document.getElementById('eulerTVL').textContent = '$' + (data.protocols.euler.poolsData.summary.totalTVL / 1000000).toFixed(1) + 'M';
-        document.getElementById('eulerError').textContent = '';
+        safeUpdateElement('eulerStatus', 'API_SUCCESS');
+        safeUpdateElement('eulerStatus', 'protocol-status online', 'className');
+        safeUpdateElement('eulerTopAPY', data.protocols.euler.poolsData.summary.highestAPY.toFixed(1) + '%');
+        safeUpdateElement('eulerPoolCount', data.protocols.euler.poolsData.summary.totalPools);
+        safeUpdateElement('eulerTVL', '$' + (data.protocols.euler.poolsData.summary.totalTVL / 1000000).toFixed(1) + 'M');
+        safeUpdateElement('eulerError', '');
     } else {
-        document.getElementById('eulerStatus').textContent = 'API_FAILED';
-        document.getElementById('eulerStatus').className = 'protocol-status failed';
-        document.getElementById('eulerError').textContent = data.protocols.euler.error;
+        safeUpdateElement('eulerStatus', 'API_FAILED');
+        safeUpdateElement('eulerStatus', 'protocol-status failed', 'className');
+        safeUpdateElement('eulerError', data.protocols.euler.error);
     }
 
     // Yield Yak data
     if (data.protocols.yieldYak.status === 'success') {
-        document.getElementById('yieldYakStatus').textContent = 'API_SUCCESS';
-        document.getElementById('yieldYakStatus').className = 'protocol-status online';
-        document.getElementById('yieldYakTopAPY').textContent = data.protocols.yieldYak.avalancheData.summary.highestAPY.toFixed(1) + '%';
-        document.getElementById('yieldYakFarmCount').textContent = data.protocols.yieldYak.avalancheData.summary.activeFarms;
-        document.getElementById('yieldYakTVL').textContent = '$' + (data.protocols.yieldYak.avalancheData.summary.totalTVL / 1000000).toFixed(1) + 'M';
-        document.getElementById('yieldYakError').textContent = '';
+        safeUpdateElement('yieldYakStatus', 'API_SUCCESS');
+        safeUpdateElement('yieldYakStatus', 'protocol-status online', 'className');
+        safeUpdateElement('yieldYakTopAPY', data.protocols.yieldYak.avalancheData.summary.highestAPY.toFixed(1) + '%');
+        safeUpdateElement('yieldYakFarmCount', data.protocols.yieldYak.avalancheData.summary.activeFarms);
+        safeUpdateElement('yieldYakTVL', '$' + (data.protocols.yieldYak.avalancheData.summary.totalTVL / 1000000).toFixed(1) + 'M');
+        safeUpdateElement('yieldYakError', '');
     } else {
-        document.getElementById('yieldYakStatus').textContent = 'API_FAILED';
-        document.getElementById('yieldYakStatus').className = 'protocol-status failed';
-        document.getElementById('yieldYakError').textContent = data.protocols.yieldYak.error;
+        safeUpdateElement('yieldYakStatus', 'API_FAILED');
+        safeUpdateElement('yieldYakStatus', 'protocol-status failed', 'className');
+        safeUpdateElement('yieldYakError', data.protocols.yieldYak.error);
     }
 
     // DeFiLlama data
     if (data.protocols.defiLlama.status === 'success') {
-        document.getElementById('defiLlamaStatus').textContent = 'API_SUCCESS';
-        document.getElementById('defiLlamaStatus').className = 'protocol-status online';
-        document.getElementById('defiLlamaPoolCount').textContent = data.protocols.defiLlama.marketOverview.summary.poolCount;
-        document.getElementById('defiLlamaAvgAPY').textContent = data.protocols.defiLlama.marketOverview.summary.avgLendingAPY.toFixed(1) + '%';
-        document.getElementById('defiLlamaError').textContent = '';
+        safeUpdateElement('defiLlamaStatus', 'API_SUCCESS');
+        safeUpdateElement('defiLlamaStatus', 'protocol-status online', 'className');
+        safeUpdateElement('defiLlamaPoolCount', data.protocols.defiLlama.marketOverview.summary.poolCount);
+        safeUpdateElement('defiLlamaAvgAPY', data.protocols.defiLlama.marketOverview.summary.avgLendingAPY.toFixed(1) + '%');
+        safeUpdateElement('defiLlamaError', '');
     } else {
-        document.getElementById('defiLlamaStatus').textContent = 'API_FAILED';
-        document.getElementById('defiLlamaStatus').className = 'protocol-status failed';
-        document.getElementById('defiLlamaError').textContent = data.protocols.defiLlama.error;
+        safeUpdateElement('defiLlamaStatus', 'API_FAILED');
+        safeUpdateElement('defiLlamaStatus', 'protocol-status failed', 'className');
+        safeUpdateElement('defiLlamaError', data.protocols.defiLlama.error);
     }
 
-    document.getElementById('dataQuality').textContent = data.dataQuality.level;
+    safeUpdateElement('dataQuality', data.dataQuality.level);
 }
 
 // Update protocols tab
@@ -1200,73 +1151,6 @@ function updateProtocolsTab(data) {
     });
 }
 
-// Update strategies tab
-function updateStrategiesTab(data) {
-    const tbody = document.querySelector('#strategyTable tbody');
-    tbody.innerHTML = '';
-
-    if (Object.keys(data.strategies).length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="loading">No strategies available - all APIs failed</td></tr>';
-        return;
-    }
-
-    Object.entries(data.strategies).forEach(([name, strategy]) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${strategy.strategy}</td>
-            <td>${strategy.apy.toFixed(2)}%</td>
-            <td>${strategy.netAPY.toFixed(2)}%</td>
-            <td>${strategy.riskLevel}</td>
-            <td>${strategy.source}</td>
-            <td>CALCULATED</td>
-        `;
-        tbody.appendChild(row);
-    });
-}
-
-// Update comparison tab
-function updateComparisonTab(data) {
-    const aaveEulerDiv = document.getElementById('aaveEulerComparison');
-    const yieldDiv = document.getElementById('yieldComparison');
-
-    if (data.protocolComparison.aaveVsEuler) {
-        const comparison = data.protocolComparison.aaveVsEuler;
-        aaveEulerDiv.innerHTML = `
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Asset</th>
-                        <th>Euler APY</th>
-                        <th>Aave APY</th>
-                        <th>Difference</th>
-                        <th>Better Protocol</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${Object.entries(comparison.comparisons).map(([asset, comp]) => `
-                        <tr>
-                            <td>${comp.asset}</td>
-                            <td>${comp.euler.apy.toFixed(2)}%</td>
-                            <td>${comp.aave.apy.toFixed(2)}%</td>
-                            <td>${comp.difference.apyDiff.toFixed(2)}%</td>
-                            <td>${comp.difference.betterProtocol.toUpperCase()}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-            <div style="margin-top: 10px; font-size: 12px;">
-                Summary: ${comparison.summary.eulerWins} Euler wins, ${comparison.summary.aaveWins} Aave wins
-            </div>
-        `;
-    } else {
-        aaveEulerDiv.innerHTML = '<div class="loading">Comparison not available - need both Aave and Euler API success</div>';
-    }
-
-    yieldDiv.innerHTML = `
-        <div>Available Protocols: ${data.protocolComparison.summary.availableProtocols.join(', ')}</div>
-        <div>Failed Protocols: ${data.protocolComparison.summary.failedProtocols.join(', ')}</div>
-    `;
-}
 
 // Update analysis tab
 function updateAnalysisTab(data) {
@@ -1403,6 +1287,654 @@ function exportData() {
     URL.revokeObjectURL(url);
 
     showStatus('Data exported successfully', 'success');
+}
+
+// INCENTIVES ANALYSIS FUNCTIONS
+
+// Analyze incentive breakdown from pool data - FIXED: Add validation and better estimation
+function analyzeIncentiveBreakdown(poolData) {
+    const baseAPY = poolData.apyBase || 0;
+    const rewardAPY = poolData.apyReward || 0;
+    let totalAPY = poolData.apy || 0;
+    
+    // FIXED: Validate and cap impossible APY values
+    if (totalAPY > 1000) {
+        console.warn(`🚨 Impossible APY detected: ${totalAPY}% for ${poolData.project}:${poolData.symbol}. Capping at 100%.`);
+        totalAPY = 100; // Cap at 100% APY
+    }
+    
+    // If no explicit breakdown, try to estimate
+    let estimatedBaseAPY = baseAPY;
+    let estimatedRewardAPY = rewardAPY;
+    
+    if (baseAPY === 0 && rewardAPY === 0 && totalAPY > 0) {
+        // IMPROVED: More sophisticated estimation based on protocol type and context
+        const project = poolData.project?.toLowerCase() || '';
+        const symbol = poolData.symbol?.toLowerCase() || '';
+        const tvl = poolData.tvlUsd || 0;
+        
+        if (['aave-v3', 'euler-v2', 'compound', 'benqi'].includes(project)) {
+            // Lending protocols: mostly base yield, some incentives
+            if (totalAPY > 15) {
+                // High APY for lending = likely has incentives
+                estimatedBaseAPY = Math.min(totalAPY * 0.5, 8); // Base capped at 8%
+                estimatedRewardAPY = totalAPY - estimatedBaseAPY;
+            } else {
+                // Normal lending rates
+                estimatedBaseAPY = totalAPY * 0.8;
+                estimatedRewardAPY = totalAPY * 0.2;
+            }
+        } else if (['yield-yak', 'beefy', 'vector-finance'].includes(project)) {
+            // Auto-compound protocols: Most yield comes from compounding rewards
+            estimatedBaseAPY = Math.min(totalAPY * 0.3, 5); // Base underlying yield capped at 5%
+            estimatedRewardAPY = totalAPY - estimatedBaseAPY;
+        } else if (['trader-joe', 'traderjoe', 'pangolin', 'curve', 'balancer'].includes(project) || 
+                   symbol.includes('lp') || symbol.includes('pair')) {
+            // DEX protocols: Mix of fees and incentives
+            if (totalAPY > 20) {
+                // High APY DEX = heavy incentives
+                estimatedBaseAPY = Math.min(totalAPY * 0.3, 10); // Trading fees capped at 10%
+                estimatedRewardAPY = totalAPY - estimatedBaseAPY;
+            } else {
+                // Normal DEX yields
+                estimatedBaseAPY = totalAPY * 0.6; // Trading fees
+                estimatedRewardAPY = totalAPY * 0.4; // Incentives
+            }
+        } else if (totalAPY > 50) {
+            // Very high APY = likely unsustainable incentive farming
+            estimatedBaseAPY = Math.min(totalAPY * 0.1, 5); // Very little base yield
+            estimatedRewardAPY = totalAPY - estimatedBaseAPY;
+        } else if (totalAPY > 25) {
+            // High APY = incentive-heavy
+            estimatedBaseAPY = totalAPY * 0.25;
+            estimatedRewardAPY = totalAPY * 0.75;
+        } else {
+            // Conservative estimate for unknown protocols
+            estimatedBaseAPY = totalAPY * 0.6;
+            estimatedRewardAPY = totalAPY * 0.4;
+        }
+    }
+    
+    // FIXED: Ensure breakdown makes sense
+    if (estimatedBaseAPY + estimatedRewardAPY > totalAPY * 1.1) {
+        // If breakdown exceeds total by more than 10%, normalize
+        const total = estimatedBaseAPY + estimatedRewardAPY;
+        estimatedBaseAPY = (estimatedBaseAPY / total) * totalAPY;
+        estimatedRewardAPY = (estimatedRewardAPY / total) * totalAPY;
+    }
+    
+    const incentiveRatio = totalAPY > 0 ? (estimatedRewardAPY / totalAPY) * 100 : 0;
+    
+    return {
+        baseAPY: estimatedBaseAPY,
+        incentiveAPY: estimatedRewardAPY,
+        totalAPY: totalAPY,
+        incentiveRatio: Math.min(incentiveRatio, 100), // Cap at 100%
+        rewardTokens: poolData.rewardTokens || [],
+        sustainability: assessIncentiveSustainability(poolData, incentiveRatio),
+        riskLevel: assessIncentiveRisk(incentiveRatio, totalAPY),
+        hasExplicitBreakdown: baseAPY > 0 || rewardAPY > 0,
+        dataQuality: {
+            hasValidAPY: totalAPY > 0 && totalAPY <= 100,
+            hasExplicitBreakdown: baseAPY > 0 || rewardAPY > 0,
+            estimationMethod: baseAPY === 0 && rewardAPY === 0 ? 'protocol-based' : 'explicit'
+        }
+    };
+}
+
+// Assess incentive sustainability - FIXED: Better protocol-aware scoring
+function assessIncentiveSustainability(poolData, incentiveRatio) {
+    let score = 100; // Start with perfect score
+    let factors = [];
+    
+    const project = poolData.project?.toLowerCase() || '';
+    const apy = poolData.apy || 0;
+    const tvl = poolData.tvlUsd || 0;
+    
+    // FIXED: Protocol-specific incentive dependency assessment
+    if (['yield-yak', 'beefy', 'vector-finance'].includes(project)) {
+        // Auto-compound protocols: High incentive ratios are NORMAL and sustainable
+        if (incentiveRatio > 90) {
+            score -= 10; // Much smaller penalty
+            factors.push('Auto-compound protocol with high reward optimization');
+        }
+        score += 15; // Bonus for established auto-compound protocols
+        factors.push('Established auto-compound protocol (+15)');
+    } else if (['aave-v3', 'compound', 'euler-v2', 'benqi'].includes(project)) {
+        // Lending protocols: High incentive ratios are concerning
+        if (incentiveRatio > 80) {
+            score -= 30;
+            factors.push('High incentive dependency for lending protocol (-30)');
+        } else if (incentiveRatio > 60) {
+            score -= 15;
+            factors.push('Moderate incentive dependency for lending protocol (-15)');
+        }
+        score += 10;
+        factors.push('Established lending protocol (+10)');
+    } else {
+        // Other protocols: Standard assessment
+        if (incentiveRatio > 80) {
+            score -= 40;
+            factors.push('Very high incentive dependency (>80%)');
+        } else if (incentiveRatio > 60) {
+            score -= 25;
+            factors.push('High incentive dependency (>60%)');
+        } else if (incentiveRatio > 40) {
+            score -= 15;
+            factors.push('Moderate incentive dependency (>40%)');
+        }
+    }
+    
+    // TVL size affects sustainability
+    if (tvl > 50000000) { // >$50M
+        score += 15;
+        factors.push('Very large TVL base (+15)');
+    } else if (tvl > 10000000) { // >$10M
+        score += 10;
+        factors.push('Large TVL base (+10)');
+    } else if (tvl > 1000000) { // >$1M
+        score += 5;
+        factors.push('Moderate TVL base (+5)');
+    } else if (tvl < 100000) { // <$100k
+        score -= 15;
+        factors.push('Small TVL base (-15)');
+    }
+    
+    // FIXED: More nuanced APY assessment
+    if (apy > 100) {
+        score -= 25;
+        factors.push('Extreme APY (>100%) - monitor closely (-25)');
+    } else if (apy > 50) {
+        if (['yield-yak', 'beefy'].includes(project)) {
+            score -= 10; // Less penalty for auto-compound protocols
+            factors.push('High APY for auto-compound protocol (-10)');
+        } else {
+            score -= 20;
+            factors.push('Very high APY (>50%) sustainability risk (-20)');
+        }
+    } else if (apy > 25) {
+        score -= 5; // Minor penalty for moderately high APY
+        factors.push('Moderately high APY (>25%) - acceptable (-5)');
+    }
+    
+    // FIXED: Additional bonuses for known good protocols
+    if (['trader-joe', 'traderjoe', 'pangolin', 'curve', 'balancer'].includes(project)) {
+        score += 8;
+        factors.push('Established DEX protocol (+8)');
+    } else if (['gmx', 'platypus'].includes(project)) {
+        score += 5;
+        factors.push('Known yield farming protocol (+5)');
+    }
+    
+    score = Math.max(0, Math.min(100, score));
+    
+    let rating;
+    if (score >= 75) rating = 'HIGH';
+    else if (score >= 55) rating = 'MEDIUM';
+    else if (score >= 35) rating = 'LOW';
+    else rating = 'VERY_LOW';
+    
+    return {
+        score: score,
+        rating: rating,
+        factors: factors
+    };
+}
+
+// Assess incentive risk level
+function assessIncentiveRisk(incentiveRatio, totalAPY) {
+    if (incentiveRatio > 80 && totalAPY > 50) return 'EXTREME';
+    if (incentiveRatio > 70 && totalAPY > 25) return 'HIGH';
+    if (incentiveRatio > 50) return 'MEDIUM';
+    if (incentiveRatio > 30) return 'LOW';
+    return 'MINIMAL';
+}
+
+// Generate comprehensive incentives analysis
+function generateIncentivesAnalysis(data) {
+    console.log('🎯 Generating comprehensive incentives analysis...');
+    
+    const analysis = {
+        overview: {
+            totalIncentiveAPY: 0,
+            totalBaseAPY: 0,
+            avgIncentiveRatio: 0,
+            activeProgramsCount: 0,
+            totalIncentiveTVL: 0
+        },
+        protocolBreakdown: {},
+        rewardTokens: {},
+        sustainability: {
+            high: [],
+            medium: [],
+            low: [],
+            veryLow: []
+        },
+        opportunities: [],
+        risks: []
+    };
+    
+    let allPools = [];
+    
+    // Collect all pools with incentive data
+    if (data.protocols.defiLlama.status === 'success') {
+        const pools = data.protocols.defiLlama.marketOverview.allAvalanchePools || [];
+        allPools = allPools.concat(pools);
+    }
+    
+    // Add Yield Yak farms
+    if (data.protocols.yieldYak.status === 'success') {
+        const farms = data.protocols.yieldYak.avalancheData.allFarms || [];
+        const yakPools = farms.map(farm => ({
+            project: 'yield-yak',
+            symbol: farm.symbol,
+            apy: farm.estimatedAPY,
+            tvlUsd: farm.tvl,
+            apyBase: 0, // Yield Yak doesn't separate base/reward
+            apyReward: farm.estimatedAPY, // Assume all is reward-based
+            rewardTokens: farm.rewardToken ? [farm.rewardToken] : [],
+            chain: 'Avalanche'
+        }));
+        allPools = allPools.concat(yakPools);
+    }
+    
+    console.log('🎯 Analyzing', allPools.length, 'pools for incentives...');
+    
+    // Analyze each pool
+    const poolAnalyses = allPools.map(pool => {
+        const incentiveBreakdown = analyzeIncentiveBreakdown(pool);
+        return {
+            ...pool,
+            incentiveAnalysis: incentiveBreakdown
+        };
+    });
+    
+    // Calculate overview metrics - FIXED: Use averages, not cumulative sums
+    const validPools = poolAnalyses.filter(p => p.apy > 0);
+    if (validPools.length > 0) {
+        // FIXED: Calculate proper averages instead of meaningless sums
+        analysis.overview.avgIncentiveAPY = validPools.reduce((sum, p) => sum + p.incentiveAnalysis.incentiveAPY, 0) / validPools.length;
+        analysis.overview.avgBaseAPY = validPools.reduce((sum, p) => sum + p.incentiveAnalysis.baseAPY, 0) / validPools.length;
+        analysis.overview.avgIncentiveRatio = validPools.reduce((sum, p) => sum + p.incentiveAnalysis.incentiveRatio, 0) / validPools.length;
+        analysis.overview.activeProgramsCount = validPools.filter(p => p.incentiveAnalysis.incentiveAPY > 0).length;
+        analysis.overview.totalIncentiveTVL = validPools.reduce((sum, p) => sum + (p.tvlUsd || 0), 0);
+        
+        // FIXED: Add weighted averages for more meaningful metrics
+        const totalTVL = validPools.reduce((sum, p) => sum + (p.tvlUsd || 0), 0);
+        if (totalTVL > 0) {
+            analysis.overview.weightedAvgIncentiveAPY = validPools.reduce((sum, p) => sum + (p.incentiveAnalysis.incentiveAPY * (p.tvlUsd || 0)), 0) / totalTVL;
+            analysis.overview.weightedAvgBaseAPY = validPools.reduce((sum, p) => sum + (p.incentiveAnalysis.baseAPY * (p.tvlUsd || 0)), 0) / totalTVL;
+            analysis.overview.weightedAvgIncentiveRatio = validPools.reduce((sum, p) => sum + (p.incentiveAnalysis.incentiveRatio * (p.tvlUsd || 0)), 0) / totalTVL;
+        }
+    }
+    
+    // Group by protocol
+    const protocolGroups = {};
+    validPools.forEach(pool => {
+        const project = pool.project || 'unknown';
+        if (!protocolGroups[project]) {
+            protocolGroups[project] = [];
+        }
+        protocolGroups[project].push(pool);
+    });
+    
+    // Analyze each protocol
+    Object.entries(protocolGroups).forEach(([protocol, pools]) => {
+        const protocolTVL = pools.reduce((sum, p) => sum + (p.tvlUsd || 0), 0);
+        const avgIncentiveRatio = pools.reduce((sum, p) => sum + p.incentiveAnalysis.incentiveRatio, 0) / pools.length;
+        const avgAPY = pools.reduce((sum, p) => sum + (p.apy || 0), 0) / pools.length;
+        const topPool = pools.sort((a, b) => (b.apy || 0) - (a.apy || 0))[0];
+        
+        analysis.protocolBreakdown[protocol] = {
+            poolCount: pools.length,
+            totalTVL: protocolTVL,
+            avgIncentiveRatio: avgIncentiveRatio,
+            avgAPY: avgAPY,
+            topAPY: topPool?.apy || 0,
+            topPool: topPool?.symbol || 'N/A',
+            sustainabilityRating: calculateProtocolSustainability(pools)
+        };
+    });
+    
+    // Analyze reward tokens - FIXED: Handle object serialization properly
+    const rewardTokenCounts = {};
+    validPools.forEach(pool => {
+        if (pool.rewardTokens && pool.rewardTokens.length > 0) {
+            pool.rewardTokens.forEach(token => {
+                // FIXED: Convert token to string and handle objects properly
+                let tokenKey;
+                if (typeof token === 'string') {
+                    tokenKey = token;
+                } else if (typeof token === 'object' && token !== null) {
+                    // Handle token objects - extract address or symbol
+                    tokenKey = token.address || token.symbol || token.name || JSON.stringify(token).substring(0, 50);
+                } else {
+                    tokenKey = String(token);
+                }
+                
+                // Ensure we have a valid token key
+                if (!tokenKey || tokenKey === 'undefined' || tokenKey === 'null') {
+                    tokenKey = 'UNKNOWN_TOKEN';
+                }
+                
+                if (!rewardTokenCounts[tokenKey]) {
+                    rewardTokenCounts[tokenKey] = { count: 0, totalTVL: 0, pools: [] };
+                }
+                rewardTokenCounts[tokenKey].count++;
+                rewardTokenCounts[tokenKey].totalTVL += pool.tvlUsd || 0;
+                rewardTokenCounts[tokenKey].pools.push(pool.symbol || 'Unknown');
+            });
+        }
+    });
+    
+    analysis.rewardTokens = rewardTokenCounts;
+    
+    // Categorize by sustainability
+    validPools.forEach(pool => {
+        const sustainability = pool.incentiveAnalysis.sustainability.rating;
+        switch (sustainability) {
+            case 'HIGH':
+                analysis.sustainability.high.push(pool);
+                break;
+            case 'MEDIUM':
+                analysis.sustainability.medium.push(pool);
+                break;
+            case 'LOW':
+                analysis.sustainability.low.push(pool);
+                break;
+            case 'VERY_LOW':
+                analysis.sustainability.veryLow.push(pool);
+                break;
+        }
+    });
+    
+    // Identify opportunities
+    const highIncentivePools = validPools.filter(p => p.incentiveAnalysis.incentiveRatio > 50 && p.incentiveAnalysis.sustainability.rating !== 'VERY_LOW');
+    const sustainableHighYield = validPools.filter(p => p.apy > 15 && p.incentiveAnalysis.sustainability.rating === 'HIGH');
+    
+    if (highIncentivePools.length > 0) {
+        analysis.opportunities.push(`${highIncentivePools.length} pools with >50% incentive APY and decent sustainability`);
+    }
+    if (sustainableHighYield.length > 0) {
+        analysis.opportunities.push(`${sustainableHighYield.length} high-yield pools (>15%) with high sustainability rating`);
+    }
+    
+    // Identify risks
+    const extremeRiskPools = validPools.filter(p => p.incentiveAnalysis.riskLevel === 'EXTREME');
+    const unsustainablePools = validPools.filter(p => p.incentiveAnalysis.sustainability.rating === 'VERY_LOW');
+    
+    if (extremeRiskPools.length > 0) {
+        analysis.risks.push(`${extremeRiskPools.length} pools with extreme incentive risk`);
+    }
+    if (unsustainablePools.length > 0) {
+        analysis.risks.push(`${unsustainablePools.length} pools with very low sustainability ratings`);
+    }
+    
+    console.log('🎯 Incentives analysis complete:', {
+        totalPools: validPools.length,
+        avgIncentiveRatio: analysis.overview.avgIncentiveRatio.toFixed(1) + '%',
+        activeProgramsCount: analysis.overview.activeProgramsCount
+    });
+    
+    return analysis;
+}
+
+// Calculate protocol sustainability rating
+function calculateProtocolSustainability(pools) {
+    const avgSustainability = pools.reduce((sum, p) => sum + p.incentiveAnalysis.sustainability.score, 0) / pools.length;
+    
+    if (avgSustainability >= 80) return 'HIGH';
+    if (avgSustainability >= 60) return 'MEDIUM';
+    if (avgSustainability >= 40) return 'LOW';
+    return 'VERY_LOW';
+}
+
+// Update incentives tab
+function updateIncentivesTab(data) {
+    console.log('🎯 Updating incentives tab...');
+    
+    const overviewDiv = document.getElementById('incentivesOverview');
+    const protocolDiv = document.getElementById('protocolIncentives');
+    const rewardTokensDiv = document.getElementById('rewardTokens');
+    const sustainabilityDiv = document.getElementById('incentiveSustainability');
+    const opportunitiesDiv = document.getElementById('incentiveOpportunities');
+    
+    // Check if we have enough data
+    if (data.protocols.defiLlama.status !== 'success' && data.protocols.yieldYak.status !== 'success') {
+        const errorMsg = '<div class="loading">Incentives analysis not available - insufficient API data</div>';
+        overviewDiv.innerHTML = errorMsg;
+        protocolDiv.innerHTML = errorMsg;
+        rewardTokensDiv.innerHTML = errorMsg;
+        sustainabilityDiv.innerHTML = errorMsg;
+        opportunitiesDiv.innerHTML = errorMsg;
+        return;
+    }
+    
+    // Generate incentives analysis
+    const incentivesAnalysis = generateIncentivesAnalysis(data);
+    
+    // Update overview - FIXED: Show meaningful averages instead of cumulative sums
+    overviewDiv.innerHTML = `
+        <div class="comparison-section">
+            <h3>Incentives Overview</h3>
+            <div class="protocol-grid">
+                <div class="protocol-card">
+                    <div class="protocol-header">Total Incentive Programs</div>
+                    <div class="metric">
+                        <span class="metric-label">Active Programs:</span>
+                        <span class="metric-value">${incentivesAnalysis.overview.activeProgramsCount}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Incentive Ratio:</span>
+                        <span class="metric-value">${incentivesAnalysis.overview.avgIncentiveRatio.toFixed(1)}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Total Incentive TVL:</span>
+                        <span class="metric-value">$${(incentivesAnalysis.overview.totalIncentiveTVL/1000000).toFixed(1)}M</span>
+                    </div>
+                </div>
+                <div class="protocol-card">
+                    <div class="protocol-header">APY Breakdown</div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Base APY:</span>
+                        <span class="metric-value">${incentivesAnalysis.overview.avgBaseAPY.toFixed(1)}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Incentive APY:</span>
+                        <span class="metric-value">${incentivesAnalysis.overview.avgIncentiveAPY.toFixed(1)}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Base vs Incentive:</span>
+                        <span class="metric-value">${(100 - incentivesAnalysis.overview.avgIncentiveRatio).toFixed(1)}% / ${incentivesAnalysis.overview.avgIncentiveRatio.toFixed(1)}%</span>
+                    </div>
+                </div>
+            </div>
+            ${incentivesAnalysis.overview.weightedAvgIncentiveRatio ? `
+                <div class="comparison-section" style="margin-top: 15px;">
+                    <h4>TVL-Weighted Averages (More Representative)</h4>
+                    <div style="font-size: 12px; line-height: 1.6;">
+                        <div><strong>Weighted Avg Base APY:</strong> ${incentivesAnalysis.overview.weightedAvgBaseAPY.toFixed(2)}%</div>
+                        <div><strong>Weighted Avg Incentive APY:</strong> ${incentivesAnalysis.overview.weightedAvgIncentiveAPY.toFixed(2)}%</div>
+                        <div><strong>Weighted Incentive Ratio:</strong> ${incentivesAnalysis.overview.weightedAvgIncentiveRatio.toFixed(1)}%</div>
+                        <div style="margin-top: 8px; color: #666; font-size: 11px;">
+                            <em>Weighted averages account for pool size and provide more realistic market representation</em>
+                        </div>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+    
+    // Update protocol breakdown
+    protocolDiv.innerHTML = `
+        <div class="comparison-section">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Protocol</th>
+                        <th>Pool Count</th>
+                        <th>Avg Incentive %</th>
+                        <th>Avg APY</th>
+                        <th>Top APY</th>
+                        <th>TVL</th>
+                        <th>Sustainability</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${Object.entries(incentivesAnalysis.protocolBreakdown).map(([protocol, data]) => `
+                        <tr>
+                            <td><strong>${protocol}</strong></td>
+                            <td>${data.poolCount}</td>
+                            <td>${data.avgIncentiveRatio.toFixed(1)}%</td>
+                            <td>${data.avgAPY.toFixed(1)}%</td>
+                            <td>${data.topAPY.toFixed(1)}%</td>
+                            <td>$${(data.totalTVL/1000000).toFixed(1)}M</td>
+                            <td><span class="protocol-status ${data.sustainabilityRating.toLowerCase()}">${data.sustainabilityRating}</span></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    // Update reward tokens
+    const topRewardTokens = Object.entries(incentivesAnalysis.rewardTokens)
+        .sort(([,a], [,b]) => b.totalTVL - a.totalTVL)
+        .slice(0, 10);
+    
+    rewardTokensDiv.innerHTML = `
+        <div class="comparison-section">
+            <h4>Top Reward Tokens by TVL</h4>
+            ${topRewardTokens.length > 0 ? `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Token Address</th>
+                            <th>Pool Count</th>
+                            <th>Total TVL</th>
+                            <th>Sample Pools</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${topRewardTokens.map(([token, data]) => `
+                            <tr>
+                                <td style="font-size: 10px;">${token.substring(0, 10)}...${token.substring(token.length - 8)}</td>
+                                <td>${data.count}</td>
+                                <td>$${(data.totalTVL/1000000).toFixed(1)}M</td>
+                                <td style="font-size: 11px;">${data.pools.slice(0, 2).join(', ')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            ` : '<div class="loading">No reward token data available</div>'}
+        </div>
+    `;
+    
+    // Update sustainability analysis
+    sustainabilityDiv.innerHTML = `
+        <div class="comparison-section">
+            <h4>Sustainability Distribution</h4>
+            <div class="protocol-grid">
+                <div class="protocol-card">
+                    <div class="protocol-header">High Sustainability</div>
+                    <div class="metric">
+                        <span class="metric-label">Pool Count:</span>
+                        <span class="metric-value">${incentivesAnalysis.sustainability.high.length}</span>
+                    </div>
+                    <div style="font-size: 11px; margin-top: 5px;">
+                        ${incentivesAnalysis.sustainability.high.slice(0, 3).map(p => `${p.project}:${p.symbol}`).join(', ')}
+                    </div>
+                </div>
+                <div class="protocol-card">
+                    <div class="protocol-header">Medium Sustainability</div>
+                    <div class="metric">
+                        <span class="metric-label">Pool Count:</span>
+                        <span class="metric-value">${incentivesAnalysis.sustainability.medium.length}</span>
+                    </div>
+                    <div style="font-size: 11px; margin-top: 5px;">
+                        ${incentivesAnalysis.sustainability.medium.slice(0, 3).map(p => `${p.project}:${p.symbol}`).join(', ')}
+                    </div>
+                </div>
+                <div class="protocol-card">
+                    <div class="protocol-header">Low Sustainability</div>
+                    <div class="metric">
+                        <span class="metric-label">Pool Count:</span>
+                        <span class="metric-value">${incentivesAnalysis.sustainability.low.length}</span>
+                    </div>
+                    <div style="font-size: 11px; margin-top: 5px;">
+                        ${incentivesAnalysis.sustainability.low.slice(0, 3).map(p => `${p.project}:${p.symbol}`).join(', ')}
+                    </div>
+                </div>
+                <div class="protocol-card">
+                    <div class="protocol-header">Very Low Sustainability</div>
+                    <div class="metric">
+                        <span class="metric-label">Pool Count:</span>
+                        <span class="metric-value">${incentivesAnalysis.sustainability.veryLow.length}</span>
+                    </div>
+                    <div style="font-size: 11px; margin-top: 5px;">
+                        ${incentivesAnalysis.sustainability.veryLow.slice(0, 3).map(p => `${p.project}:${p.symbol}`).join(', ')}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Update opportunities
+    opportunitiesDiv.innerHTML = `
+        <div class="comparison-section">
+            <h4>Opportunities & Risks</h4>
+            <div style="margin-bottom: 15px;">
+                <strong>Opportunities:</strong>
+                ${incentivesAnalysis.opportunities.length > 0 ? 
+                    `<ul>${incentivesAnalysis.opportunities.map(opp => `<li>${opp}</li>`).join('')}</ul>` :
+                    '<div class="loading">No specific opportunities identified</div>'
+                }
+            </div>
+            <div>
+                <strong>Risks:</strong>
+                ${incentivesAnalysis.risks.length > 0 ? 
+                    `<ul>${incentivesAnalysis.risks.map(risk => `<li style="color: #cc0000;">${risk}</li>`).join('')}</ul>` :
+                    '<div class="loading">No major risks identified</div>'
+                }
+            </div>
+        </div>
+        
+        <div class="comparison-section">
+            <h4>Top High-Incentive Opportunities</h4>
+            ${incentivesAnalysis.sustainability.high.length > 0 ? `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Protocol</th>
+                            <th>Symbol</th>
+                            <th>Total APY</th>
+                            <th>Incentive %</th>
+                            <th>TVL</th>
+                            <th>Risk Level</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${incentivesAnalysis.sustainability.high
+                            .filter(p => p.incentiveAnalysis.incentiveRatio > 30)
+                            .sort((a, b) => (b.apy || 0) - (a.apy || 0))
+                            .slice(0, 10)
+                            .map(pool => `
+                                <tr>
+                                    <td>${pool.project}</td>
+                                    <td>${pool.symbol}</td>
+                                    <td><strong>${(pool.apy || 0).toFixed(1)}%</strong></td>
+                                    <td>${pool.incentiveAnalysis.incentiveRatio.toFixed(1)}%</td>
+                                    <td>$${((pool.tvlUsd || 0)/1000).toFixed(0)}K</td>
+                                    <td><span class="protocol-status ${pool.incentiveAnalysis.riskLevel.toLowerCase()}">${pool.incentiveAnalysis.riskLevel}</span></td>
+                                </tr>
+                            `).join('')}
+                    </tbody>
+                </table>
+            ` : '<div class="loading">No high-sustainability incentive opportunities found</div>'}
+        </div>
+    `;
+    
+    console.log('🎯 Incentives tab updated successfully');
 }
 
 // Auto-refresh functionality

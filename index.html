@@ -248,6 +248,38 @@
             border-radius: 4px;
         }
 
+        /* Incentives Tab Styling */
+        .protocol-status.high {
+            background-color: #e6ffe6;
+            color: #006600;
+        }
+
+        .protocol-status.medium {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .protocol-status.low {
+            background-color: #ffe6e6;
+            color: #cc0000;
+        }
+
+        .protocol-status.very_low {
+            background-color: #ffcccc;
+            color: #990000;
+        }
+
+        .protocol-status.minimal {
+            background-color: #e6ffe6;
+            color: #006600;
+        }
+
+        .protocol-status.extreme {
+            background-color: #ff9999;
+            color: #660000;
+            font-weight: bold;
+        }
+
         @media (max-width: 768px) {
             .protocol-grid {
                 grid-template-columns: 1fr;
@@ -290,10 +322,9 @@
             <div class="tab active" onclick="showTab('overview')">Overview</div>
             <div class="tab" onclick="showTab('buckets')">APY Buckets</div>
             <div class="tab" onclick="showTab('protocols')">Protocols</div>
-            <div class="tab" onclick="showTab('strategies')">Strategies</div>
-            <div class="tab" onclick="showTab('comparison')">Comparison</div>
-            <div class="tab" onclick="showTab('analysis')">Analysis</div>
-        </div>
+        <div class="tab" onclick="showTab('analysis')">Analysis</div>
+        <div class="tab" onclick="showTab('incentives')">Incentives</div>
+    </div>
 
         <div id="overview" class="tab-content active">
             <h2>Protocol Overview</h2>
@@ -404,42 +435,6 @@
             </div>
         </div>
 
-        <div id="strategies" class="tab-content">
-            <h2>Strategy Calculations</h2>
-            <table class="data-table" id="strategyTable">
-                <thead>
-                    <tr>
-                        <th>Strategy</th>
-                        <th>APY</th>
-                        <th>Net APY</th>
-                        <th>Risk Level</th>
-                        <th>Source</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td colspan="6" class="loading">No strategies calculated. Load data first.</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <div id="comparison" class="tab-content">
-            <h2>Protocol Comparison</h2>
-            <div class="comparison-section">
-                <h3>Aave V3 vs Euler V2</h3>
-                <div id="aaveEulerComparison">
-                    <div class="loading">Comparison data not available. Both protocols must have successful API calls.</div>
-                </div>
-            </div>
-            <div class="comparison-section">
-                <h3>Yield Opportunities</h3>
-                <div id="yieldComparison">
-                    <div class="loading">Yield comparison not available.</div>
-                </div>
-            </div>
-        </div>
 
         <div id="analysis" class="tab-content">
             <h2>Market Analysis</h2>
@@ -453,6 +448,29 @@
             <h3>Opportunities</h3>
             <div id="opportunities">
                 <div class="loading">Opportunity analysis not available.</div>
+            </div>
+        </div>
+
+        <div id="incentives" class="tab-content">
+            <h2>Incentives Analysis</h2>
+            <div id="incentivesOverview">
+                <div class="loading">Incentives analysis not available. Load data first.</div>
+            </div>
+            <h3>Protocol Incentive Breakdown</h3>
+            <div id="protocolIncentives">
+                <div class="loading">Protocol incentive data not available.</div>
+            </div>
+            <h3>Reward Token Analysis</h3>
+            <div id="rewardTokens">
+                <div class="loading">Reward token analysis not available.</div>
+            </div>
+            <h3>Incentive Sustainability</h3>
+            <div id="incentiveSustainability">
+                <div class="loading">Sustainability analysis not available.</div>
+            </div>
+            <h3>High-Incentive Opportunities</h3>
+            <div id="incentiveOpportunities">
+                <div class="loading">Incentive opportunities not available.</div>
             </div>
         </div>
 
