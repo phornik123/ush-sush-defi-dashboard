@@ -271,10 +271,6 @@
             Multi-Protocol Yield Optimization for Avalanche
         </div>
 
-        <div class="cors-warning" id="corsWarning" style="display: none;">
-            <strong>CORS Notice:</strong> Some APIs may be blocked when hosted. If you see API failures, this is likely due to CORS restrictions. 
-            Consider using a proxy server or serverless functions for production deployment.
-        </div>
 
         <div class="controls">
             <button onclick="fetchAllData()">Fetch All Data</button>
@@ -354,6 +350,24 @@
                         <span id="eulerTVL" class="metric-value">--</span>
                     </div>
                     <div id="eulerError" class="error-message"></div>
+                </div>
+
+                <div class="protocol-card">
+                    <div class="protocol-header">🦬 Yield Yak</div>
+                    <div id="yieldYakStatus" class="protocol-status failed">API_FAILED</div>
+                    <div class="metric">
+                        <span class="metric-label">Top APY:</span>
+                        <span id="yieldYakTopAPY" class="metric-value">--</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Active Farms:</span>
+                        <span id="yieldYakFarmCount" class="metric-value">--</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Total TVL:</span>
+                        <span id="yieldYakTVL" class="metric-value">--</span>
+                    </div>
+                    <div id="yieldYakError" class="error-message"></div>
                 </div>
 
                 <div class="protocol-card">
@@ -445,7 +459,7 @@
         <div class="metadata">
             <strong>Last Updated:</strong> <span id="lastUpdated">Never</span><br>
             <strong>Execution Time:</strong> <span id="executionTime">--</span><br>
-            <strong>API Sources:</strong> Aave V3 GraphQL, Beefy API, Euler V2 DeFiLlama, DeFiLlama Yields
+            <strong>API Sources:</strong> Aave V3 DeFiLlama, Beefy API, Euler V2 DeFiLlama, Yield Yak API, DeFiLlama Yields
         </div>
     </div>
 
