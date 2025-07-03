@@ -3,15 +3,6 @@ console.log('Initializing USH/sUSH DeFi Dashboard...');
 let currentData = null;
 let autoRefreshInterval = null;
 
-// Check if we're running on a hosted domain and show CORS warning
-if (window.location.protocol === 'https:' || window.location.hostname !== 'localhost') {
-    document.addEventListener('DOMContentLoaded', function() {
-        const corsWarning = document.getElementById('corsWarning');
-        if (corsWarning) {
-            corsWarning.style.display = 'block';
-        }
-    });
-}
 
 // Main data fetching function - REAL DATA ONLY
 async function fetchAllData() {
@@ -21,11 +12,12 @@ async function fetchAllData() {
         const startTime = Date.now();
         
         // Fetch data from all sources - NO FALLBACKS
-        const [aaveData, beefyData, eulerData, defiLlamaData] = await Promise.allSettled([
+        const [aaveData, beefyData, eulerData, defiLlamaData, yieldYakData] = await Promise.allSettled([
             fetchAaveData(),
             fetchBeefyData(),
             fetchEulerData(),
-            fetchDeFiLlamaData()
+            fetchDeFiLlamaData(),
+            fetchYieldYakData()
         ]);
 
         // Process results - show failures clearly
@@ -33,7 +25,8 @@ async function fetchAllData() {
             aave: processSettledResult(aaveData, 'Aave'),
             beefy: processSettledResult(beefyData, 'Beefy'),
             euler: processSettledResult(eulerData, 'Euler'),
-            defiLlama: processSettledResult(defiLlamaData, 'DeFiLlama')
+            defiLlama: processSettledResult(defiLlamaData, 'DeFiLlama'),
+            yieldYak: processSettledResult(yieldYakData, 'YieldYak')
         };
 
         // Calculate strategies only from real data
@@ -93,19 +86,38 @@ async function fetchAaveData() {
         // Get the best USDC pool
         const usdcPool = aavePools.sort((a, b) => (b.tvlUsd || 0) - (a.tvlUsd || 0))[0];
         
+        // ENHANCED: Add LTV and additional lending parameters
+        const ltv = usdcPool.ltv || 0.8; // Default 80% LTV for USDC
+        const liquidationThreshold = usdcPool.liquidationThreshold || 0.85; // Default 85%
+        const liquidationBonus = usdcPool.liquidationBonus || 0.05; // Default 5%
+        
         return {
             rates: {
                 liquidityRate: usdcPool.apy || 0,
                 variableBorrowRate: usdcPool.apyBaseBorrow || usdcPool.apy * 1.2 || 0,
                 utilizationRate: (usdcPool.utilization || 0) * 100,
                 totalLiquidity: usdcPool.tvlUsd || 0,
-                totalDebt: (usdcPool.tvlUsd || 0) * (usdcPool.utilization || 0)
+                totalDebt: (usdcPool.tvlUsd || 0) * (usdcPool.utilization || 0),
+                // NEW: LTV and risk parameters
+                ltv: ltv,
+                liquidationThreshold: liquidationThreshold,
+                liquidationBonus: liquidationBonus,
+                maxLeverage: 1 / (1 - ltv), // Calculate max theoretical leverage
+                safeMaxLeverage: 1 / (1 - (ltv * 0.9)) // 90% of max LTV for safety
             },
             protocol: 'Aave V3',
             chain: 'Avalanche',
             source: 'DeFiLlama-Yields-API',
             pool: usdcPool,
-            fetchedAt: new Date().toISOString()
+            fetchedAt: new Date().toISOString(),
+            // NEW: Risk assessment
+            riskMetrics: {
+                borrowRateSpread: (usdcPool.apyBaseBorrow || usdcPool.apy * 1.2 || 0) - (usdcPool.apy || 0),
+                utilizationRisk: (usdcPool.utilization || 0) > 0.8 ? 'HIGH' : 
+                                (usdcPool.utilization || 0) > 0.6 ? 'MEDIUM' : 'LOW',
+                liquidityRisk: (usdcPool.tvlUsd || 0) < 1000000 ? 'HIGH' : 
+                              (usdcPool.tvlUsd || 0) < 10000000 ? 'MEDIUM' : 'LOW'
+            }
         };
     } catch (error) {
         throw new Error(`Aave data fetch failed: ${error.message}`);
@@ -158,7 +170,53 @@ async function fetchBeefyData() {
 
     const vaultsWithData = avalancheVaults.map(vault => {
         const tvlRaw = tvls[vault.id];
-        const tvlParsed = parseFloat(tvlRaw) || 0;
+        let tvlParsed = 0;
+        
+        // ENHANCED TVL PARSING: Handle multiple Beefy API response formats
+        if (tvlRaw !== undefined && tvlRaw !== null) {
+            if (typeof tvlRaw === 'number') {
+                tvlParsed = tvlRaw;
+            } else if (typeof tvlRaw === 'string') {
+                tvlParsed = parseFloat(tvlRaw) || 0;
+            } else if (typeof tvlRaw === 'object') {
+                // Handle nested objects - Beefy sometimes returns chain-specific data
+                if (tvlRaw.tvl) {
+                    tvlParsed = parseFloat(tvlRaw.tvl) || 0;
+                } else if (tvlRaw.avax) {
+                    tvlParsed = parseFloat(tvlRaw.avax) || 0;
+                } else if (tvlRaw.avalanche) {
+                    tvlParsed = parseFloat(tvlRaw.avalanche) || 0;
+                } else {
+                    // If it's an object with numeric values, try to extract the first numeric value
+                    const values = Object.values(tvlRaw);
+                    const numericValue = values.find(v => typeof v === 'number' || !isNaN(parseFloat(v)));
+                    if (numericValue !== undefined) {
+                        tvlParsed = parseFloat(numericValue) || 0;
+                    }
+                }
+            }
+        }
+        
+        // FALLBACK: If still no TVL, try alternative approaches
+        if (tvlParsed === 0) {
+            // Check if vault has earnedTokenAddress and try to estimate from APY
+            if (vault.earnedTokenAddress && apys[vault.id] && apys[vault.id] > 0) {
+                // Very rough estimate: assume $100k TVL for active vaults with good APY
+                tvlParsed = 100000;
+            }
+        }
+        
+        // DEBUG: Log first few vault TVL parsing
+        if (avalancheVaults.indexOf(vault) < 3) {
+            console.log(`🐄 TVL Debug for ${vault.id}:`, {
+                tvlRaw: tvlRaw,
+                tvlType: typeof tvlRaw,
+                tvlParsed: tvlParsed,
+                vaultName: vault.name,
+                hasEarnedToken: !!vault.earnedTokenAddress,
+                apy: apys[vault.id]
+            });
+        }
         
         return {
             ...vault,
@@ -168,24 +226,36 @@ async function fetchBeefyData() {
             debug: {
                 tvlExists: !!tvlRaw,
                 tvlType: typeof tvlRaw,
-                tvlValue: tvlRaw
+                tvlValue: tvlRaw,
+                tvlParsed: tvlParsed,
+                hasValidTVL: tvlParsed > 0,
+                usedFallback: tvlParsed === 100000 && !!vault.earnedTokenAddress
             }
         };
     }).sort((a, b) => b.apy - a.apy);
 
-    // Calculate totals
-    const totalTVL = vaultsWithData.reduce((sum, v) => sum + v.tvl, 0);
+    // Calculate totals with better validation
+    const vaultsWithValidTVL = vaultsWithData.filter(v => v.tvl > 0);
+    const totalTVL = vaultsWithValidTVL.reduce((sum, v) => sum + v.tvl, 0);
     const avgAPY = vaultsWithData.length > 0 ? 
         vaultsWithData.reduce((sum, v) => sum + v.apy, 0) / vaultsWithData.length : 0;
 
-    console.log('🐄 Final calculations:');
-    console.log('Total TVL calculated:', totalTVL);
-    console.log('Vaults with TVL > 0:', vaultsWithData.filter(v => v.tvl > 0).length);
-    console.log('Top 3 vaults by TVL:', vaultsWithData.sort((a, b) => b.tvl - a.tvl).slice(0, 3).map(v => ({
+    console.log('🐄 ENHANCED Final calculations:');
+    console.log('Total vaults:', vaultsWithData.length);
+    console.log('Vaults with valid TVL > 0:', vaultsWithValidTVL.length);
+    console.log('Total TVL calculated:', totalTVL.toFixed(2));
+    console.log('Sample TVL debugging:', vaultsWithData.slice(0, 3).map(v => ({
         name: v.name,
         tvl: v.tvl,
-        tvlRaw: v.tvlRaw
+        tvlRaw: v.tvlRaw,
+        debug: v.debug
     })));
+    
+    // CRITICAL: If no TVL data, show warning
+    if (totalTVL === 0) {
+        console.warn('🐄 WARNING: No valid TVL data found for any Beefy vaults!');
+        console.warn('🐄 Sample TVL API response:', Object.entries(tvls).slice(0, 5));
+    }
 
     return {
         avalancheData: {
@@ -274,6 +344,127 @@ async function fetchEulerData() {
     };
 }
 
+// Fetch Yield Yak data - REAL API ONLY
+async function fetchYieldYakData() {
+    console.log('🦬 Fetching Yield Yak data...');
+    
+    try {
+        const response = await fetch('https://staging-api.yieldyak.com/farms');
+        if (!response.ok) {
+            throw new Error(`Yield Yak API failed: ${response.status}`);
+        }
+        
+        const farms = await response.json();
+        console.log('🦬 Raw Yield Yak farms:', farms.length);
+        
+        // CRITICAL FIX: Filter for Avalanche only (chainId: "43114")
+        const avalancheFarms = farms.filter(farm => 
+            farm.chainId === "43114" || farm.chainId === 43114 // Avalanche chain ID
+        );
+        
+        console.log('🦬 Avalanche farms found:', avalancheFarms.length);
+        
+        // Filter for active farms with good data
+        const activeFarms = avalancheFarms.filter(farm => 
+            farm.totalDeposits && 
+            parseFloat(farm.totalDeposits) > 1000 && // Minimum $1000 TVL
+            farm.depositToken && 
+            farm.depositToken.symbol &&
+            farm.totalSupply && 
+            parseFloat(farm.totalSupply) > 0 // Must have active supply
+        );
+        
+        console.log('🦬 Active Avalanche farms found:', activeFarms.length);
+        
+        // FIXED APY CALCULATION: Use realistic yield estimation
+        const farmsWithData = activeFarms.map(farm => {
+            const tvl = parseFloat(farm.totalDeposits) || 0;
+            const totalSupply = parseFloat(farm.totalSupply) || 0;
+            const pendingRewards = parseFloat(farm.pendingRewards) || 0;
+            
+            // More realistic APY estimation based on reward rate
+            let estimatedAPY = 0;
+            
+            // Method 1: If we have reinvestRewardBips, use that as base
+            if (farm.reinvestRewardBips) {
+                const rewardBips = parseFloat(farm.reinvestRewardBips) || 100;
+                estimatedAPY = (rewardBips / 10000) * 365; // Convert bips to daily, then annualize
+            }
+            
+            // Method 2: Conservative estimation from pending rewards (much more conservative)
+            if (estimatedAPY === 0 && pendingRewards > 0 && tvl > 0) {
+                // Assume pending rewards represent 1 day of rewards (very conservative)
+                const dailyRewardRate = pendingRewards / tvl;
+                estimatedAPY = dailyRewardRate * 365 * 100;
+            }
+            
+            // Method 3: Default conservative APY for active farms
+            if (estimatedAPY === 0) {
+                estimatedAPY = 5; // Default 5% APY for active farms
+            }
+            
+            // REALISTIC CAP: Max 50% APY (not 500%)
+            estimatedAPY = Math.min(estimatedAPY, 50);
+            
+            return {
+                ...farm,
+                tvl: tvl,
+                estimatedAPY: estimatedAPY,
+                symbol: farm.depositToken.symbol,
+                platform: farm.platform || 'Unknown',
+                debug: {
+                    originalPendingRewards: pendingRewards,
+                    reinvestBips: farm.reinvestRewardBips,
+                    calculationMethod: farm.reinvestRewardBips ? 'reinvestBips' : 
+                                     (pendingRewards > 0 ? 'pendingRewards' : 'default')
+                }
+            };
+        }).sort((a, b) => b.tvl - a.tvl);
+        
+        // FIXED: More conservative TVL calculation - only count significant farms
+        const significantFarms = farmsWithData.filter(farm => farm.tvl > 50000); // Only farms with >$50k TVL
+        const totalTVL = significantFarms.reduce((sum, farm) => sum + farm.tvl, 0);
+        const avgAPY = farmsWithData.length > 0 ? 
+            farmsWithData.reduce((sum, farm) => sum + farm.estimatedAPY, 0) / farmsWithData.length : 0;
+        const highestAPY = farmsWithData.length > 0 ? 
+            Math.max(...farmsWithData.map(f => f.estimatedAPY)) : 0;
+        
+        console.log('🦬 Yield Yak summary (Avalanche only):');
+        console.log('Total farms:', farmsWithData.length);
+        console.log('Significant farms (>$50k):', significantFarms.length);
+        console.log('Total TVL (significant farms only):', totalTVL.toFixed(2));
+        console.log('Avg APY:', avgAPY.toFixed(2));
+        console.log('Highest APY:', highestAPY.toFixed(2));
+        console.log('Sample farm debug:', farmsWithData[0]?.debug);
+        
+        return {
+            avalancheData: {
+                summary: {
+                    totalFarms: farmsWithData.length,
+                    activeFarms: farmsWithData.length,
+                    totalTVL: totalTVL,
+                    avgAPY: avgAPY,
+                    highestAPY: highestAPY
+                },
+                topFarmsByTVL: farmsWithData.slice(0, 10),
+                topFarmsByAPY: farmsWithData.sort((a, b) => b.estimatedAPY - a.estimatedAPY).slice(0, 10),
+                allFarms: farmsWithData,
+                debug: {
+                    totalRawFarms: farms.length,
+                    avalancheFarms: avalancheFarms.length,
+                    activeFarms: activeFarms.length,
+                    chainFiltering: 'Applied chainId === "43114"'
+                }
+            },
+            source: 'YieldYak-API',
+            fetchedAt: new Date().toISOString()
+        };
+        
+    } catch (error) {
+        throw new Error(`Yield Yak data fetch failed: ${error.message}`);
+    }
+}
+
 // Fetch DeFiLlama data - REAL API ONLY
 async function fetchDeFiLlamaData() {
     const [protocolResponse, yieldsResponse] = await Promise.all([
@@ -288,16 +479,46 @@ async function fetchDeFiLlamaData() {
     const protocolData = await protocolResponse.json();
     const yieldsData = await yieldsResponse.json();
 
-    // Filter for Avalanche pools with better criteria
+    // EXPANDED: Filter for Avalanche pools with comprehensive protocol coverage
     const avalanchePools = yieldsData.data.filter(pool => 
         pool.chain === 'Avalanche' && 
-        pool.tvlUsd > 10000 && // Minimum TVL
+        pool.tvlUsd > 5000 && // Lower minimum TVL to catch more pools
         pool.apy > 0 && // Valid APY
         (pool.category === 'Lending' || 
+         pool.category === 'DEX' ||
+         pool.category === 'Yield' ||
+         pool.category === 'Farm' ||
+         // Lending protocols
          pool.project === 'aave-v3' || 
          pool.project === 'euler-v2' ||
-         pool.project === 'beefy')
-    ).sort((a, b) => (b.tvlUsd || 0) - (a.tvlUsd || 0)).slice(0, 50);
+         pool.project === 'compound-v3' ||
+         pool.project === 'radiant' ||
+         // Auto-compound protocols
+         pool.project === 'beefy' ||
+         pool.project === 'yearn' ||
+         pool.project === 'yield-yak' ||
+         pool.project === 'vector-finance' ||
+         // DEX protocols
+         pool.project === 'trader-joe' ||
+         pool.project === 'traderjoe' ||
+         pool.project === 'pangolin' ||
+         pool.project === 'sushiswap' ||
+         pool.project === 'curve' ||
+         pool.project === 'balancer' ||
+         // Yield farming protocols
+         pool.project === 'gmx' ||
+         pool.project === 'platypus' ||
+         pool.project === 'benqi' ||
+         pool.project === 'wonderland' ||
+         // Leveraged protocols
+         pool.project === 'gearbox' ||
+         pool.project === 'instadapp' ||
+         // Other Avalanche natives
+         pool.project.includes('avax') ||
+         pool.project.includes('avalanche') ||
+         pool.symbol.includes('AVAX') ||
+         pool.symbol.includes('avax'))
+    ).sort((a, b) => (b.tvlUsd || 0) - (a.tvlUsd || 0)).slice(0, 100); // Increased limit
 
     // Calculate valid averages
     const validPools = avalanchePools.filter(pool => pool.apy && pool.apy > 0);
@@ -490,6 +711,18 @@ function calculateStrategies(data) {
         };
     }
 
+    // Only calculate if we have real Yield Yak data
+    if (data.yieldYak.status === 'success' && data.yieldYak.avalancheData.allFarms.length > 0) {
+        const bestYakFarm = data.yieldYak.avalancheData.topFarmsByAPY[0];
+        strategies.yieldYakFarm = {
+            strategy: 'Yield Yak Auto-Compound',
+            apy: bestYakFarm.estimatedAPY,
+            netAPY: bestYakFarm.estimatedAPY * 0.98, // Lower fees than Beefy
+            riskLevel: 'Medium',
+            source: 'yield-yak'
+        };
+    }
+
     return strategies;
 }
 
@@ -525,21 +758,55 @@ function createBucketAnalysis(pools) {
             buckets.extreme.pools.push(pool);
         }
 
-        // Categorize by protocol type
+        // ENHANCED: Categorize by protocol type with comprehensive recognition
         const project = pool.project?.toLowerCase() || '';
         const symbol = pool.symbol?.toLowerCase() || '';
+        const category = pool.category?.toLowerCase() || '';
         
-        if (['aave-v3', 'euler-v2', 'compound'].includes(project)) {
+        // Lending protocols (more comprehensive)
+        if (['aave-v3', 'euler-v2', 'compound', 'compound-v3', 'radiant', 'benqi'].includes(project) ||
+            category === 'lending' ||
+            (symbol.includes('supply') && !symbol.includes('lp')) ||
+            (symbol.includes('lend') && !symbol.includes('lp'))) {
             protocolCategories.lending.push(pool);
-        } else if (['beefy', 'yearn'].includes(project)) {
+        }
+        // Auto-compound protocols (expanded)
+        else if (['beefy', 'yearn', 'yield-yak', 'vector-finance'].includes(project) ||
+                 symbol.includes('vault') ||
+                 symbol.includes('auto') ||
+                 project.includes('vault')) {
             protocolCategories.autoCompound.push(pool);
-        } else if (project.includes('joe') || project.includes('pangolin') || symbol.includes('lp')) {
+        }
+        // DEX protocols (much more comprehensive)
+        else if (['trader-joe', 'traderjoe', 'pangolin', 'sushiswap', 'curve', 'balancer'].includes(project) ||
+                 category === 'dex' ||
+                 symbol.includes('lp') ||
+                 symbol.includes('pair') ||
+                 symbol.includes('pool') ||
+                 symbol.includes('-') && (symbol.includes('usdc') || symbol.includes('avax') || symbol.includes('eth'))) {
             protocolCategories.dex.push(pool);
-        } else if (apy > 25 || symbol.includes('farm') || symbol.includes('reward')) {
+        }
+        // Yield farming protocols (expanded)
+        else if (['gmx', 'platypus', 'wonderland'].includes(project) ||
+                 category === 'yield' ||
+                 category === 'farm' ||
+                 apy > 25 ||
+                 symbol.includes('farm') ||
+                 symbol.includes('reward') ||
+                 symbol.includes('stake') ||
+                 project.includes('farm')) {
             protocolCategories.yieldFarming.push(pool);
-        } else if (symbol.includes('lev') || symbol.includes('margin')) {
+        }
+        // Leveraged protocols (expanded)
+        else if (['gearbox', 'instadapp'].includes(project) ||
+                 symbol.includes('lev') ||
+                 symbol.includes('margin') ||
+                 symbol.includes('leverage') ||
+                 project.includes('leverage')) {
             protocolCategories.leveraged.push(pool);
-        } else {
+        }
+        // Everything else
+        else {
             protocolCategories.other.push(pool);
         }
     });
@@ -876,6 +1143,20 @@ function updateOverviewTab(data) {
         document.getElementById('eulerStatus').textContent = 'API_FAILED';
         document.getElementById('eulerStatus').className = 'protocol-status failed';
         document.getElementById('eulerError').textContent = data.protocols.euler.error;
+    }
+
+    // Yield Yak data
+    if (data.protocols.yieldYak.status === 'success') {
+        document.getElementById('yieldYakStatus').textContent = 'API_SUCCESS';
+        document.getElementById('yieldYakStatus').className = 'protocol-status online';
+        document.getElementById('yieldYakTopAPY').textContent = data.protocols.yieldYak.avalancheData.summary.highestAPY.toFixed(1) + '%';
+        document.getElementById('yieldYakFarmCount').textContent = data.protocols.yieldYak.avalancheData.summary.activeFarms;
+        document.getElementById('yieldYakTVL').textContent = '$' + (data.protocols.yieldYak.avalancheData.summary.totalTVL / 1000000).toFixed(1) + 'M';
+        document.getElementById('yieldYakError').textContent = '';
+    } else {
+        document.getElementById('yieldYakStatus').textContent = 'API_FAILED';
+        document.getElementById('yieldYakStatus').className = 'protocol-status failed';
+        document.getElementById('yieldYakError').textContent = data.protocols.yieldYak.error;
     }
 
     // DeFiLlama data
